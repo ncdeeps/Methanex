@@ -1,0 +1,905 @@
+
+
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+### Load required libraries
+```{r}
+library(readxl)
+library(xlsx)
+library(corrplot)
+library(corrr)
+library(dplyr)
+library(cowplot)
+library(Hmisc)
+library(GGally)
+library(caret)
+library(jtools)
+library(car)
+library(neuralnet)
+library(devtools)
+library(randomForest)
+library(plsRglm)
+library(keras)
+library(ggplot2)
+library(tidyverse)
+library(qtlcharts)
+library(glmnet)
+library(vip)
+library(MLmetrics)
+
+```
+
+# Data Wrangling
+```{r}
+# Import the dataset
+MyData <- read_excel("Distillation Variables_1.xlsx", sheet = "Copy-Pi data norm",skip=4,col_names = TRUE,.name_repair = "universal")
+
+# Changing data type to numeric
+MyData <- MyData %>% mutate_all(as.numeric)
+
+#Removing all NA
+MyData <- na.omit(MyData)
+
+```
+
+
+#Peeking at the structure
+```{r}
+str(MyData)
+head(MyData)
+dim(MyData)
+```
+
+
+# Clean data of outliers 
+# Manual outlier exception on Efficiency
+```{r}
+MyData <- MyData[(MyData$Cont.Efficiency<5.5),]
+MyData <- MyData[(4<MyData$Cont.Efficiency),]
+```
+
+# Manual clearing of outliers from pv
+```{r}
+
+MyData <- MyData[(MyData$Top.Bottom.temperature<88.75),]
+MyData <- filter(MyData,MyData$Top.Bottom.temperature<87.63 & 87.64>MyData$Top.Bottom.temperature)
+MyData <- MyData[(MyData$Top.Bottom.temperature!=87.63574),]
+MyData <- MyData[(MyData$Bottom.temperature<125),]
+MyData <- MyData[(MyData$Crude.prod<2),]
+MyData <- MyData[(MyData$CW.Temp<30),]
+MyData <- MyData[(MyData$D.406.temperaure<40),]
+MyData <- MyData[(MyData$Fusel.Prod<0.04),]
+MyData <- MyData[(MyData$Top.Overhead.pressure<0.71),]
+MyData <- MyData[(MyData$Top.Overhead.temperature<60),]
+MyData <- MyData[(MyData$Product.Ethanol<10),]
+MyData <- MyData[(MyData$Ref.Bottoms.flow<25),]
+MyData <- MyData[(MyData$Ref.Bottoms.flow<115),]
+MyData <- MyData[(MyData$Ref.dp.prod<0.02),]
+MyData <- MyData[(MyData$Ref.Reb.A.Stm.prod<1),]
+MyData <- MyData[(MyData$Ref.Reb.B.Stm.prod<1),]
+MyData <- MyData[(MyData$Ref.reboiler.A.reboiler.level<30.05),]
+MyData <- MyData[(MyData$Reflux.liquid.temperature<50),]
+MyData <- MyData[(MyData$Top.column.reflux.ratio<40),]
+MyData <- MyData[(MyData$Steam.pressure<3.5),]
+MyData <- MyData[(MyData$Top.column.reflux.ratio<0.55),]
+MyData <- MyData[(MyData$Top.dp.prod<0.0075),]
+MyData <- MyData[(MyData$Top.Reb.Stm.prod<0.3),]
+MyData <- MyData[(MyData$Ref.Reflux.temp<40),]
+MyData <- MyData[(MyData$Top.Reb.Stm.prod<0.27),]
+MyData <- MyData[(MyData$Top.column.reflux.ratio<0.48),]
+MyData <- MyData[(MyData$Ref.column.inlet.temp<115),]
+
+MyData <- MyData[(0.69<MyData$Top.Overhead.pressure),]
+MyData <- MyData[(1.3<MyData$Crude.prod),]
+MyData <- MyData[(114<MyData$Bottom.temperature),]
+MyData <- MyData[(71<MyData$Ref.Overhead.temp),]
+MyData <- MyData[(8<MyData$Ref.Bottoms.flow),]
+MyData <- MyData[100<(MyData$Ref.column.inlet.temp),]
+MyData <- MyData[29.95<(MyData$Ref.reboiler.A.reboiler.level),]
+MyData <- MyData[29.9<(MyData$Ref.reboiler.B.reboiler.level),]
+MyData <- MyData[3.3<(MyData$Steam.pressure),]                  
+MyData <- MyData[173<(MyData$Steam.temp),]                  
+MyData <- MyData[0.35<(MyData$Top.column.reflux.ratio),] 
+
+```
+
+
+### Removing NA
+```{r}
+MyData <- na.omit(MyData)
+```
+
+
+#Creating a copy of dataset removing unnecesarry coloumns
+```{r}
+dataset <- select(MyData,-c(1:2,32))
+```
+
+### Create Test/train dataset
+```{r}
+set.seed(12345)
+row.number = sample(1:nrow(MyData), 0.7*nrow(MyData))   
+data_train = MyData[row.number,]
+data_test = MyData[-row.number,]
+data_train = select(data_train,-c(1:2,32))
+dim(data_train)
+head(data_train)
+```
+
+```{r}
+data_test = select(data_test,-c(1:2,32))
+dim(data_test)
+head(data_test)
+
+```
+
+
+#Scatterlplot of pv vs efficiency
+```{r}
+library(tidyr)
+library(ggplot2)
+jpeg("scatterplot.jpeg", width = 960, height = 960)
+dataset %>%
+  gather(-Cont.Efficiency, key = "var", value = "value") %>% 
+  ggplot(aes(x = value, y = Cont.Efficiency)) +
+  facet_wrap(~ var, scales = "free") +
+  geom_point() +
+  stat_smooth()
+dev.off()
+```
+# Feature  Selection
+# Finding correlation between variables
+```{r}
+c2 <- cor(dataset,use="complete.obs",method = "pearson")  #How each PV related to each other
+
+c3 <- cor(dataset,use="complete.obs",method = "spearman") #more reliable with non linear data
+```
+
+```{r}
+cor_ans <- dataset %>% correlate(use = "complete.obs",method = "pearson") %>% focus(Cont.Efficiency) # correlating pv with efficiency
+str(cor_ans)
+cor_ans
+```
+
+```{r}
+cor_ans1 <- dataset %>% correlate(use = "complete.obs",method = "spearman") %>% focus(Cont.Efficiency) # correlating pv with efficiency
+str(cor_ans1)
+cor_ans1
+```
+
+
+#each pv correlation with Each other
+
+```{r}
+#jpeg("Corr_Variables.jpeg", width = 960, height = 960)
+corrplot(c2, method = "circle",order = "hclust",addrect = 2)
+res1 <- cor.mtest(dataset,conf.level=0.95)
+corrplot(c2,p.mat = res1$p,sig.level = 0.05,order = "hclust",addrect = 2)#cross out insignificant values
+#dev.off()
+
+# interactive plot
+
+interactiveplot <- iplotCorr(mat=c2, scatterplots = TRUE, reorder = TRUE)
+setScreenSize("large")
+htmlwidgets::saveWidget(interactiveplot, file="C:/Data Science/Data601-Project/Workfiles/iplotCorr_example.html")
+interactiveplot
+```
+# Incase of non linear model for future datasets of another plant area
+```{r}
+#jpeg("Corr_Variables.jpeg", width = 960, height = 960)
+corrplot(c3, method = "circle",order = "hclust",addrect = 2)
+res1 <- cor.mtest(dataset,conf.level=0.95)
+corrplot(c3,p.mat = res1$p,sig.level = 0.05,order = "hclust")#cross out insignificant values
+#dev.off()
+
+#interactive heat map
+spearman <- cor(c3, use="pairwise.complete.obs", method="spearman")
+ord <- hclust(as.dist(-spearman))$order
+iplotCorr(mat=c3[,ord], reorder = TRUE,corr=spearman[ord,ord])
+
+```
+# Building Model
+
+
+# Linear Regression
+
+```{r}
+lm_Efficiency <- lm(Cont.Efficiency ~ .,data = data_train)
+summary(lm_Efficiency)
+summ(lm_Efficiency)
+
+```
+
+### Prediction in Train set
+```{r}
+lm_predicttrain <- predict(lm_Efficiency, data_train)
+lm_predicttest <- predict(lm_Efficiency, data_test)
+```
+
+### Calculate relative accuracy on train data
+```{r}
+lm_RelErrortrain <- abs(data_train$Cont.Efficiency - lm_predicttrain)/data_train$Cont.Efficiency
+(1-mean(lm_RelErrortrain))*100 
+```
+
+#calculate train MSE
+```{r}
+mean((data_train$Cont.Efficiency - lm_predicttrain)^2)
+```
+
+### Calculate relative accuracy on test data
+```{r}
+lm_RelErrortest <- abs(data_test$Cont.Efficiency - lm_predicttest)/data_test$Cont.Efficiency
+(1-mean(lm_RelErrortest))*100 
+```
+
+#calculate test MSE
+```{r}
+
+mean((data_test$Cont.Efficiency - lm_predicttest)^2)
+```
+
+
+### Show Imp Variables
+```{r paged.print=FALSE}
+vi <- varImp(lm_Efficiency, scale = TRUE)
+vi <- vi[order(vi$Overall, decreasing = TRUE),,drop = FALSE]
+vi
+
+```
+# Removing important predictors and building lm
+```{r}
+lm_Efficiency_1 <- lm(Cont.Efficiency ~ .-Steam.temp-Ref.reboiler.B.reboiler.level-Top.Overhead.pressure-Ref.column.inlet.temp-D.406.temperaure   ,data = data_train)
+summary(lm_Efficiency_1)
+summ(lm_Efficiency_1)
+AIC(lm_Efficiency)
+AIC(lm_Efficiency_1)
+
+
+```
+
+
+
+### Prediction in Train set
+```{r}
+lm_predicttrain_1 <- predict(lm_Efficiency_1, data_train)
+lm_predicttest_1 <- predict(lm_Efficiency_1, data_test)
+```
+
+
+
+### Calculate relative accuracy on train data
+```{r}
+lm_RelErrortrain_1 <- abs(data_train$Cont.Efficiency - lm_predicttrain_1)/data_train$Cont.Efficiency
+(1-mean(lm_RelErrortrain_1))*100 
+```
+
+#calculate train MSE
+```{r}
+mean((data_train$Cont.Efficiency - lm_predicttrain_1)^2)
+```
+
+### Calculate relative accuracy on test data
+```{r}
+lm_RelErrortest_1 <- abs(data_test$Cont.Efficiency - lm_predicttest_1)/data_test$Cont.Efficiency
+(1-mean(lm_RelErrortest_1))*100 
+```
+
+#calculate test MSE
+```{r}
+mean((data_test$Cont.Efficiency - lm_predicttest_1)^2)
+```
+
+
+```{r}
+par(mfrow=c(2,2))
+plot(lm_Efficiency) #plotting residuals
+```
+
+# Variance Inflation Factor
+
+```{r}
+vif(lm_Efficiency) #Values greater than 10 regarded as indicating multicollinearity
+sqrt(vif(lm_Efficiency)) >10
+```
+
+
+
+# Farrar-Glauber Test for Multicollinearity
+
+```{r}
+library(mctest)
+omcdiag(as.matrix(dataset),dataset$Cont.Efficiency)
+imcdiag(dataset,dataset$Cont.Efficiency)
+```
+
+
+
+# Cooks distance??
+```{r}
+cooksd <- cooks.distance(lm_Efficiency)
+plot(cooksd, pch = "*", cex = 2, main = "Influential Obs by Cooks distance")
+abline(h = 4*mean(cooksd, na.rm = T), col = "red")  # add cutoff line
+text(x = 1:length(cooksd) + 1, y = cooksd, labels = ifelse(cooksd > 4*mean(cooksd, na.rm = T),names(cooksd),""), col = "red")  # add labels
+```
+
+# random forest
+# Just using it to have a look at important variables
+```{r}
+bestmtry <- tuneRF(data_train,data_train$Cont.Efficiency,stepFactor = 1.5,improve = 1e-5,ntree=500)
+print(bestmtry)
+randomfit <- randomForest(Cont.Efficiency ~ .,data=data_train,mtry=bestmtry,importance=TRUE)
+randomfit
+plot(randomfit)
+```
+```{r}
+random_importance <- varImp(randomfit,scale=TRUE)
+random_importance <- random_importance[order(random_importance$Overall,decreasing=TRUE),,drop=FALSE]
+random_importance
+
+
+varImpPlot(randomfit)
+
+
+
+```
+
+
+
+# ridge regularization
+```{r}
+
+library(glmnet)
+x <- model.matrix(Cont.Efficiency ~ .,data=data_train)[,-1]
+y <- data_train$Cont.Efficiency
+
+# find best lambda using cross validation
+set.seed(123)
+cv_ridge <- cv.glmnet(x,y,alpha=0)
+cv_ridge$lambda.1se
+
+# Fit model
+ridge_fit <- glmnet(x,y,alpha=1,lambda= cv_ridge$lambda.1se) #alpha=0 for ridge
+(ridge_fit)
+
+
+# Regression coeff
+coef(ridge_fit)
+
+#Important variables
+varImp(ridge_fit,lambda= cv_ridge$lambda.1se)
+
+
+```
+# plot cv results and influential variables
+```{r}
+plot(cv_ridge)
+
+vip(ridge_fit, bar = FALSE)
+```
+
+### Prediction in Test data
+```{r}
+x.test <- model.matrix(Cont.Efficiency ~ ., data_test)[,-1]
+predictions <- ridge_fit %>% predict(x.test) %>% as.vector()
+```
+
+### Model performance metrics
+```{r}
+MSE(predictions,data_test$Cont.Efficiency)
+postResample(predictions,data_test$Cont.Efficiency)
+```
+
+# lasso regularization
+```{r}
+# find best lambda using cross validation
+set.seed(123)
+cv_lasso <- cv.glmnet(x,y,alpha=1)
+cv_lasso$lambda.1se #using lse to produce a simpler model
+lasso_fit <- glmnet(x,y,alpha = 1,lambda= cv_lasso$lambda.1se) #alpha=1 for ridge
+lasso_fit
+
+# Regression coeff
+coef(lasso_fit)
+
+#Important variables
+varImp(lasso_fit,lambda= cv_lasso$lambda.1se)
+
+
+```
+# plot cv results and influential variables
+```{r}
+plot(cv_lasso)
+
+vip(lasso_fit,bar=FALSE,num_features = 10)
+```
+
+### Prediction in Test set
+```{r}
+x.test__lasso <- model.matrix(Cont.Efficiency ~ ., data_test)[,-1]
+predictions_lasso <- lasso_fit %>% predict(x.test__lasso) %>% as.vector()
+```
+
+### Model performance metrics
+```{r}
+MSE(predictions_lasso,data_test$Cont.Efficiency)
+postResample(predictions_lasso,data_test$Cont.Efficiency)
+```
+
+# Elastic regularization
+
+```{r}
+library(foreach)
+
+# find best lambda using cross validation
+
+a <- seq(0,1,by = .1)
+search <- foreach(i = a, .combine = rbind) %dopar% {
+cv_elastic <- cv.glmnet(x, y, family = "gaussian", nfold = 10, type.measure = "deviance", paralle = TRUE, alpha = i)
+  data.frame(cvm = cv_elastic$cvm[cv_elastic$lambda == cv_elastic$lambda.1se], lambda.1se = cv_elastic$lambda.1se, alpha = i)
+}
+cv3 <- search[search$cvm == min(search$cvm), ]
+cv3
+```
+# Fitting the model
+```{r}
+Elastic_fit <- glmnet(x,y,alpha = cv3$alpha,lambda= cv3$lambda.1se) #alpha=0.3 for elastic net
+Elastic_fit
+
+# Regression coeff
+coef(Elastic_fit)
+
+#Important variables
+varImp(Elastic_fit,lambda= cv_elastic$lambda.1se)
+
+```
+# plot cv results and influential variables
+```{r}
+plot(cv_elastic)
+
+vip(Elastic_fit,bar = FALSE)
+```
+
+
+### Prediction in Test set
+```{r}
+x.test__elastic <- model.matrix(Cont.Efficiency ~ ., data_test)[,-1]
+predictions_elastic <- Elastic_fit %>% predict(x.test__elastic) %>% as.vector()
+```
+
+### Model performance metrics
+```{r}
+MSE(predictions_elastic,data_test$Cont.Efficiency)
+postResample(predictions_elastic,data_test$Cont.Efficiency)
+```
+
+#PLS Analysis
+
+```{r}
+library(pls)
+pls_fit = pls::plsr(Cont.Efficiency ~ .,data = data_train, scale = TRUE, validation = "CV")
+summary(pls_fit)
+
+
+```
+
+```{r}
+pls::validationplot(pls_fit, legendpos = "topright")
+plot(pls_fit, plottype = "scores", comps = 1:5)
+
+
+
+```
+
+#Proportion of variance explained by predictors
+```{r}
+explvar(pls_fit)/100
+```
+
+
+```{r}
+predplot(pls_fit, ncomp = 10)
+```
+
+
+```{r}
+predplot(pls_fit,ncomp = 5)
+
+```
+#Predictor Coefficients for model with 5 components
+```{r}
+coef(pls_fit,5,intercept=TRUE)
+```
+
+#PLS with linear regression for 5 components
+
+```{r}
+library(pls)
+pls_fit = pls::plsr(Cont.Efficiency ~ .,data = data_train, scale = TRUE,ncomp=5)
+summary(pls_fit)
+
+
+```
+
+```{r}
+coef(pls_fit,intercept = TRUE)
+pls_fit$loadings
+corrplot(pls_fit$loadings)
+
+
+```
+
+
+### Show Imp Variables
+```{r paged.print=FALSE}
+vi_plsr <- varImp(pls_fit, scale = TRUE)
+vi_plsr <- vi_plsr[order(vi_plsr$Overall, decreasing = TRUE),,drop = FALSE]
+vi_plsr
+
+```
+
+
+# Prediction
+
+```{r}
+pls_predtrain=predict(pls_fit,data_train)
+
+pls_predtest=predict(pls_fit,data_test)
+
+```
+
+```{r}
+
+RMSE(pls_predtest,data_test$Cont.Efficiency)
+postResample(pls_predtest,data_test$Cont.Efficiency)
+RMSEP(pls_fit,newdata=data_test)
+```
+
+
+### Calculate relative accuracy on train data
+```{r}
+lm_Errortrain <- abs(data_train$Cont.Efficiency - pls_predtrain)/data_train$Cont.Efficiency
+(1-mean(lm_Errortrain))*100 
+```
+
+#calculate train MSE
+```{r}
+mean((data_train$Cont.Efficiency - pls_predtrain)^2)
+```
+
+### Calculate relative accuracy on test data
+```{r}
+lm_Errortest <- abs(data_test$Cont.Efficiency - pls_predtest)/data_test$Cont.Efficiency
+(1-mean(lm_Errortest))*100 
+```
+
+#calculate test MSE
+```{r}
+mean((data_test$Cont.Efficiency - pls_predtest)^2)
+```
+# to speed up caret
+```{r}
+library(doParallel)
+cluster <- makeCluster(detectCores() -1) # convention to leave one core for OS
+registerDoParallel(cluster)
+```
+
+
+## PLS with Random forest
+```{r}
+
+library(recipes)
+library(caret)
+recipe <- recipes::recipe(Cont.Efficiency~.,data=data_train) %>%
+  step_scale(all_predictors(), na_rm = TRUE) %>%
+  step_pls(all_predictors(),num_comp = 5,outcome = "Cont.Efficiency")
+# trControl <- caret::trainControl(method = "boot",number = 25,search = "random")
+trControl <- caret::trainControl(method = "cv",number = 5,allowParallel = TRUE)
+
+RFmodel <- caret::train(recipe,data=data_train,method="rf",metric="RMSE",
+                        trControl=trControl,tuneLength=5, importance=TRUE)
+on.exit(stopCluster(cluster))
+
+RFmodel 
+
+
+
+plot(RFmodel)
+
+```
+
+
+
+# Predictions
+```{r}
+random_predtrain=predict(RFmodel,data_train)
+random_predtest=predict(RFmodel,data_test)
+```
+
+
+### Calculate relative accuracy on train data
+```{r}
+Random_Errortrain <- abs(data_train$Cont.Efficiency - random_predtrain)/data_train$Cont.Efficiency
+(1-mean(Random_Errortrain))*100 
+```
+
+#calculate train MSE
+```{r}
+mean((data_train$Cont.Efficiency - random_predtrain)^2)
+```
+
+### Calculate relative accuracy on test data
+```{r}
+Random_Errortest <- abs(data_test$Cont.Efficiency - random_predtest)/data_test$Cont.Efficiency
+(1-mean(Random_Errortest))*100  
+```
+
+#calculate test MSE
+```{r}
+mean((data_test$Cont.Efficiency - random_predtest)^2)
+```
+
+```{r}
+varImp(RFmodel) 
+
+RMSE(random_predtrain,data_train$Cont.Efficiency)
+postResample(random_predtrain,data_train$Cont.Efficiency)
+
+RMSE(random_predtest,data_test$Cont.Efficiency)
+postResample(random_predtest,data_test$Cont.Efficiency)
+```
+
+
+# PLS with GLM
+```{r}
+glm_fit <- caret::train(recipe,data=data_train,method="glm",metric="RMSE",
+                        trControl=trControl)
+glm_fit
+summary(glm_fit)
+
+```
+
+```{r}
+coef(glm_fit$finalModel)
+
+```
+
+
+# Prediction
+```{r}
+glm_predtrain=predict(glm_fit,data_train)
+glm_predtest=predict(glm_fit,data_test)
+```
+
+### Calculate relative accuracy on train data
+```{r}
+GLM_Error <- abs(data_train$Cont.Efficiency - glm_predtrain)/data_train$Cont.Efficiency
+(1-mean(GLM_Error))*100 
+```
+
+### Calculate relative accuracy on test data
+```{r}
+GLM_Error <- abs(data_test$Cont.Efficiency - glm_predtest)/data_test$Cont.Efficiency
+(1-mean(GLM_Error))*100 
+```
+
+
+#for future data set
+# Neural network
+```{r}
+normalize <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+
+maxmindf = as.data.frame(lapply(dataset,normalize))
+
+
+neural_trainset <- maxmindf[1:1600,]
+neural_testset <- maxmindf[1601:2000,]
+neural_trainset <- select(neural_trainset,-c(1:2,32))
+neural_testset <- select(neural_testset,-c(1:2,32))
+
+```
+
+
+```{r}
+nn=neuralnet(Cont.Efficiency~.,data=neural_trainset,hidden=5,act.fct = "logistic",linear.output = TRUE)
+plot(nn)
+```
+
+
+
+#Error along with weights between inputs, hidden layers and outputs
+```{r}
+nn$result.matrix
+```
+
+```{r}
+temp_test <- subset(neural_testset,select = -c(Cont.Efficiency))
+head(temp_test)
+nn.results <- compute(nn,temp_test)
+results <- data.frame(actual=neural_testset$Cont.Efficiency,prediction=nn.results$net.result)
+```
+
+#Actual vs Predicted table
+```{r}
+roundedresults<-sapply(results,round,digits=0)
+roundedresultsdf=data.frame(roundedresults)
+
+
+``` 
+
+
+```{r}
+plot(neural_testset$Cont.Efficiency,results$prediction)
+
+```
+
+#Garson,s Algorithm
+```{r}
+#import 'gar.fun' from Github
+source_gist('6206737')
+```
+
+```{r}
+#create a pretty color vector for the bar plot
+cols<-colorRampPalette(c('lightgreen','lightblue'))(20)
+
+#use the function on the model created above
+#does not provide direction of relationship 
+par(mar=c(3,4,1,1),family='serif')
+gar.fun('neural_testset',nn)
+
+```
+
+
+#Deep Learning 
+```{r}
+install_keras()
+
+```
+
+
+#Test and train Data modelling
+#Data transformed to matrix
+```{r}
+X_train <- data_train %>%
+  select(-Cont.Efficiency) %>%
+  as.matrix()
+Y_train <- data_train %>%
+  select(Cont.Efficiency) %>%
+  as.matrix()
+
+X_test <- data_test %>%
+  select(-Cont.Efficiency) %>%
+  as.matrix()
+Y_test <- data_test %>%
+  select(Cont.Efficiency) %>%
+  as.matrix()
+```
+
+#Scaling
+```{r}
+#create scaled x train
+X_train_scale <- X_train %>%
+  scale()
+
+#apply mean and sd from train dataset to normalize test dat set
+col_mean_train <- attr(X_train_scale,"scaled:center")
+col_sd_train <- attr(X_train_scale,"scaled:scale")
+
+X_test_scale <- X_test %>%
+  scale(center = col_mean_train,
+        scale = col_sd_train)
+```
+
+##Initialize model
+```{r}
+dnn_reg_model <- keras_model_sequential()
+```
+
+#Add layers
+```{r}
+dnn_reg_model %>%
+  layer_dense(units = 50,
+              activation = 'relu',
+              input_shape = c(ncol(X_train_scale))) %>%
+  layer_dense(units = 10,activation = 'relu') %>%
+  layer_dense(units = 2,activation = 'relu')
+
+```
+
+#Looking at summary
+```{r}
+dnn_reg_model %>% summary()
+```
+
+#loss function,Optomizer,Metric
+
+```{r}
+dnn_reg_model %>%
+  compile(optimizer = optimizer_adam(),
+          loss = 'mean_absolute_error')
+```
+
+```{r}
+create_model <- function() {
+  dnn_reg_model <- 
+    keras_model_sequential() %>%
+    layer_dense(units = 50, activation = 'relu',
+                input_shape = c(ncol(X_train_scale))) %>%
+    layer_dense(units= 50, activation = 'relu') %>%
+    layer_dense(units= 2, activation = 'relu') %>%
+    compile(optimizer = optimizer_rmsprop(),
+            loss = 'mean_absolute_error')
+}
+```
+
+#Model fitting
+
+```{r}
+dnn_reg_model <- create_model()
+history <- dnn_reg_model %>%
+  keras::fit(x = X_train_scale,
+             y = Y_train,
+             epochs = 80,
+             validation_split = 0.2,
+             verbose = 0,
+             batch_size = 128)
+plot(history, smooth = F)
+```
+
+#Implementing approach where training stops if there is no improvement
+
+```{r}
+#recreate model for new run
+dnn_reg_model <- create_model()
+
+early_stop <-  callback_early_stopping(monitor="val_loss",patience =20)
+
+history <- dnn_reg_model%>%
+  keras::fit(x = X_train_scale,
+             y = Y_train,
+             epochs = 200,
+             validation_split= 0.2,
+             verbose = 0,
+             batch_size = 128,
+             callbacks = list(early_stop))
+
+plot(history,smooth = F)
+```
+
+#Model Evaluation
+
+Creating predictions and showing plots to display correlation of prediction and actual values
+
+#Prediction
+
+```{r}
+y_test_pred <- predict(object = dnn_reg_model,x = X_test_scale)
+
+y_test_pred %>% head
+```
+
+#Performance
+
+```{r}
+data_test$y1_pred <- y_test_pred[, 1]
+```
+
+#Creating correlation plot
+```{r}
+R2_test <- caret::postResample(pred = data_test$y1_pred, obs = data_test$Cont.Efficiency)
+g <- ggplot(data_test,aes(Cont.Efficiency,y1_pred))
+g <- g + geom_point(alpha = 0.5)
+g <- g + annotate(geom = "text", x = 4.5, y = 5, label = paste("R**2 = ",round(R2_test[2],3)))
+g <-  g + labs(x = "Actual Y1", y = "Predicted Y1", title= "Y1 Correlation Plot")
+g <- g + geom_smooth(se = F, method = "lm")
+g
+R2_test
+```
+
+
