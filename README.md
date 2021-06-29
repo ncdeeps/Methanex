@@ -8,5 +8,7 @@ The scope of this research document is:
 
 - Attempt to accurately quantify those relationships
 
+- Improve plant efficiency and reduce carbon emission
+
 
 ![](https://github.com/ncdeeps/Deepak_Portfolio/blob/main/Images/Plant%20Optimization%20Summary.png)
