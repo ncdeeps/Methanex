@@ -12,3 +12,8 @@ The scope of this research document is:
 
 
 ![](https://github.com/ncdeeps/Deepak_Portfolio/blob/main/Images/Plant%20Optimization%20Summary.png)
+
+
+# Summary
+
+![](https://github.com/ncdeeps/Deepak_Portfolio/blob/main/Images/summary-softsensor.png)
